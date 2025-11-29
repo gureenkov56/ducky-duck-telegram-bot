@@ -10,6 +10,9 @@ import { prismaCategoryCreateMany, getUserId, getUserCategories} from './utils';
 config();
 const BOT_TOKEN = process.env.BOT_TOKEN as string
 
+// TODO: дать возможность пользователю выбрать основную валюту | Для некоторых валют символ перед суммой, для других после
+const userCurrency = CURRENCY.RUB
+
 const userState = new Map<number, BotStatus>();
 const prisma = new PrismaClient()
 const bot = new Telegraf(BOT_TOKEN)
@@ -101,7 +104,7 @@ bot.on(message('text'), async (ctx) => {
   const userCategories = await getUserCategories(prisma, getUserId(ctx));
 
   if (userCategories.length === 0) {
-    await ctx.reply(`Записал расход\n💸 ${transaction.amount}\n${transaction.comment}`)
+    await ctx.reply(`Записал расход\n💸 ${transaction.amount} ${userCurrency.symbol}\n${transaction.comment}`)
     const doYouWantToCreateCategoriesButtons =  [
       Markup.button.callback('Да', `wantToCreateCategories_yes`),
       Markup.button.callback('Нет, позже', `wantToCreateCategories_no`)
@@ -114,7 +117,7 @@ bot.on(message('text'), async (ctx) => {
     Markup.button.callback(category.name, `update_transaction_set_category_${category.id}_where_id_${transaction.id}`)
   );
 
-  const messageText = `Записал ${isIncome ? 'доход' : 'расход'} на сумму ${amount}₽${comment ? ` с комментарием: "${comment}"` : ''}.\n\nТеперь выбери категорию для этой транзакции:`;
+  const messageText = `Записал ${isIncome ? 'доход' : 'расход'} на сумму ${amount}${userCurrency.symbol}${comment ? ` с комментарием: "${comment}"` : ''}.\n\nТеперь выбери категорию для этой транзакции:`;
 
   return ctx.reply(messageText, Markup.inlineKeyboard(categoriesButtons, { columns: 2 }));
 })
@@ -128,7 +131,7 @@ bot.action(/update_transaction_set_category_.+/, async (ctx) => {
   const transaction = await prisma.transaction.update({where: {id: transactionId}, data: {categoryId: categoryId}})
   const {name: categoryName} = await prisma.category.findUnique({ where: { id: transaction.categoryId }, select: {name: true} })
 
-  ctx.reply(`✍️ Записал\n\n💸 ${transaction.amount}\n${categoryName}\n${transaction.comment}`);
+  ctx.reply(`✍️ Записал\n\n💸 ${transaction.amount}${userCurrency.symbol}\n${categoryName}\n${transaction.comment}`);
 });
 
 bot.action(/wantToCreateCategories_(yes|no)/, async (ctx) => {
