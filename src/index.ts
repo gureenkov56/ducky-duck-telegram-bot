@@ -7,19 +7,12 @@ import { BotStatus } from './enums';
 import { prismaCategoryCreateMany, getUserId, getUserCategories} from './utils';
 
 
+config();
 const BOT_TOKEN = process.env.BOT_TOKEN as string
 
-
-config();
-
-const userState = new Map<number, number>();
-
+const userState = new Map<number, BotStatus>();
 const prisma = new PrismaClient()
-
 const bot = new Telegraf(BOT_TOKEN)
-
-
-
 
 const Messages = {
   greeting: '👋 Привет! Чтобы записать расход, просто пришли мне сумму. Например так:\n\n`1050`\n\nЕсли хочешь, можно добавить комментарий. Просто напиши его на следующей строке:\n\n`1050\nБилеты в кино`\n\nЧтобы записать доход, просто поставь плюс перед суммой:\n\n`+5000\nЗарплата`',
@@ -129,12 +122,8 @@ bot.on(message('text'), async (ctx) => {
 // TODO сделать парсер разных update запросов
 bot.action(/update_transaction_set_category_.+/, async (ctx) => {
   const data = ctx.match[0]
-  // await ctx.answerCbQuery(); // Acknowledges the button press
-  console.log('category_ ctx', ctx);
-  // await ctx.reply('You pressed Button!');
   const categoryId = parseInt(ctx.match[0].split('_')[4], 10);
   const transactionId = parseInt(ctx.match[0].split('_')[7], 10);
-
 
   const transaction = await prisma.transaction.update({where: {id: transactionId}, data: {categoryId: categoryId}})
   const {name: categoryName} = await prisma.category.findUnique({ where: { id: transaction.categoryId }, select: {name: true} })
@@ -147,7 +136,7 @@ bot.action(/wantToCreateCategories_(yes|no)/, async (ctx) => {
   const yesOrNot = data.split('_')[1];
 
   if (yesOrNot === 'yes') {
-    createCategories(ctx)
+    return createCategories(ctx)
   } else {
     await ctx.deleteMessage();
     return ctx.reply(`Окей! Ты можешь добавить категории в любой момент, отправив команду /categories`, { parse_mode: 'Markdown' })
