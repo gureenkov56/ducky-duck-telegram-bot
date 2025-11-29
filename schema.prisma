@@ -12,28 +12,32 @@ enum TransactionType {
   EXPENSE
 }
 
-
 model User {
-  id           Int     @id
-  transactions Transactions[]
-  categories   Categories[]
+  id           Int           @id
+  transactions Transaction[]
+  categories   Category[]
 }
 
-model Transactions {
-  id          Int             @id @default(autoincrement())
-  type        TransactionType @default(EXPENSE)
-  amount      Int
-  comment     String?
-  date        DateTime @default(now())
+model Transaction {
+  id      Int             @id @default(autoincrement())
+  type    TransactionType @default(EXPENSE)
+  amount  Int
+  comment String?
+  date    DateTime        @default(now())
 
-  userId      Int
-  user        User     @relation(fields: [userId], references: [id])
+  userId Int
+  user   User @relation(fields: [userId], references: [id])
+
+  categoryId Int?
+  category   Category? @relation(fields: [categoryId], references: [id])
 }
 
-model Categories {
-  id          Int      @id @default(autoincrement())
-  name        String
+model Category {
+  id   Int    @id @default(autoincrement())
+  name String
 
-  userId      Int
-  user        User     @relation(fields: [userId], references: [id])
+  userId Int
+  user   User @relation(fields: [userId], references: [id])
+
+  transactions Transaction[]
 }

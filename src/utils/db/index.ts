@@ -1,2 +1,2 @@
-export * from './createCategories';
+export * from './prismaCategoryCreateMany';
 export * from './getUserCategories';
