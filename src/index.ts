@@ -5,6 +5,7 @@ import {Context, Markup, Telegraf} from 'telegraf';
 import { PrismaClient } from '@prisma/client'
 import { BotStatus } from './enums';
 import { prismaCategoryCreateMany, getUserId, getUserCategories} from './utils';
+import {CURRENCY} from "./constants";
 
 
 config();
@@ -75,21 +76,33 @@ bot.command('categories', async (ctx) => {
     Markup.button.callback('Добавить категорию', `addNewCategories`),
   ]
 
-  return ctx.reply(categoriesList, Markup.inlineKeyboard(options, { columns: 2 }));
+  return ctx.reply(
+      `Ваши категории:\n${categoriesList}`,
+      Markup.inlineKeyboard(options, { columns: 2 })
+  );
 })
 
+bot.command('report', async (ctx) => {
+  return ctx.reply('Отчеты пока в разработке...')
+})
+
+bot.command('list', async (ctx) => {
+  return ctx.reply('Списки операций пока в разработке...')
+})
 
 bot.on(message('text'), async (ctx) => {
   if (userState.get(ctx.from.id) === BotStatus.waitCategoriesList) {
     await prismaCategoryCreateMany(prisma, ctx.message.text, getUserId(ctx));
     userState.delete(ctx.from.id);
-    return ctx.reply(Messages.categoriesAreCreated);
+    const userCategories = await prisma.category.findMany({where: {userId: ctx.from.id}, select: {name: true}});
+    const userCategoriesList = userCategories.map(({ name }) => name).join('\n');
+    return ctx.reply(Messages.categoriesAreCreated + '\n\nВаши категории:\n' + userCategoriesList);
   }
 
   const { isIncome, amount, comment } = parseMessage(ctx.message.text);
 
   if (isNaN(amount) || amount <= 0) {
-    return ctx.reply('Пожалуйста, введи корректную сумму. Например: `1050` или `+5000`.', { parse_mode: 'Markdown' })
+    return ctx.reply('Пожалуйста, введите корректную сумму. Например: `1050` или `+5000`.\n\nТакже сразу можно указать комментарий, тогда сообщение будет выглядеть так:\`\`\`\n550\nБилеты в кино\`\`\`', { parse_mode: 'Markdown' })
   }
 
   const transaction = await prisma.transaction.create({
@@ -101,6 +114,7 @@ bot.on(message('text'), async (ctx) => {
     }
   })
 
+  // TODO отдельные категории для INCOME
   const userCategories = await getUserCategories(prisma, getUserId(ctx));
 
   if (userCategories.length === 0) {
@@ -131,7 +145,12 @@ bot.action(/update_transaction_set_category_.+/, async (ctx) => {
   const transaction = await prisma.transaction.update({where: {id: transactionId}, data: {categoryId: categoryId}})
   const {name: categoryName} = await prisma.category.findUnique({ where: { id: transaction.categoryId }, select: {name: true} })
 
-  ctx.reply(`✍️ Записал\n\n💸 ${transaction.amount}${userCurrency.symbol}\n${categoryName}\n${transaction.comment}`);
+  await ctx.deleteMessage()
+  const comment = transaction.comment.length ? `\n💬 ${transaction.comment}` : '';
+  // TODO symbol может быть расположен и перед суммой
+  const amount = `💸 ${transaction.amount}${userCurrency.symbol}`
+
+  ctx.reply(`✍️ Записал\n\n${amount}\n${categoryName}${comment}`);
 });
 
 bot.action(/wantToCreateCategories_(yes|no)/, async (ctx) => {
@@ -147,6 +166,8 @@ bot.action(/wantToCreateCategories_(yes|no)/, async (ctx) => {
 })
 
 bot.action('addNewCategories', createCategories)
+
+
 
 bot.launch()
 

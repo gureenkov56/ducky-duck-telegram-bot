@@ -3,7 +3,7 @@ enum CurrencySymbolPlace {
     AFTER,
 }
 
-const CURRENCY = {
+export const CURRENCY = {
     USD: {
         name: 'USD',
         symbol: '$',
