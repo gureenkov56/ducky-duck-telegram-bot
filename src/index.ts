@@ -1,9 +1,9 @@
-import { CURRENCY, NO_CATEGORY_ID, NO_CATEGORY_NAME } from './constants/constants';
+import { CURRENCY, NO_CATEGORY_ID, NO_CATEGORY_NAME, CHANGE_MAIN_CURRENCY } from './constants';
 
 import { message } from 'telegraf/filters'
 import { config } from 'dotenv'
 import {Context, Markup, Telegraf} from 'telegraf';
-import { PrismaClient } from '@prisma/client'
+import { Currency, PrismaClient } from '@prisma/client'
 import { BotStatus } from './enums';
 import { prismaCategoryCreateMany, getUserId, getUserCategories} from './utils';
 
@@ -14,6 +14,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN_LOCALHOST as string
 // TODO: дать возможность пользователю выбрать основную валюту | Для некоторых валют символ перед суммой, для других после
 const userCurrency = CURRENCY.RUB
 
+// userState хранит текущее состояние бота для каждого пользователя, например, когда бот ждет от пользователя список категорий
 const userState = new Map<number, BotStatus>();
 const prisma = new PrismaClient()
 const bot = new Telegraf(BOT_TOKEN)
@@ -109,6 +110,22 @@ bot.command('list', async (ctx) => {
   return ctx.reply('Списки операций пока в разработке...')
 })
 
+bot.command('help', async (ctx) => {
+  // TODO: сообщение-инструкция с описанием всех команд бота
+  return ctx.reply('Помощь пока в разработке...')
+})
+
+bot.command('settings', async (ctx) => {
+  const options = [
+    Markup.button.callback('Изменить основную валюту', CHANGE_MAIN_CURRENCY),
+  ]
+
+  return ctx.reply(
+      `Настройки пользователя:`,
+      Markup.inlineKeyboard(options, { columns: 1 })
+  );
+}) 
+
 bot.on(message('text'), async (ctx) => {
   if (userState.get(ctx.from.id) === BotStatus.waitCategoriesList) {
     await prismaCategoryCreateMany(prisma, ctx.message.text, getUserId(ctx));
@@ -195,6 +212,42 @@ bot.action('remove_my_message', (ctx) => {
 
 bot.action('addNewCategories', createCategories)
 
+bot.action(CHANGE_MAIN_CURRENCY, async (ctx) => {
+  // TODO: Implement change main currency logic
+  const currentUser = await prisma.user.findFirst({where: {id: ctx.from.id}})
+  if (!currentUser) {
+    return ctx.reply('Ошибка: пользователь не найден.')
+  }
+
+  const currentCurrencyObj = CURRENCY[currentUser.currency as keyof typeof CURRENCY];
+
+  const text = `Ваша основная валюта: ${currentCurrencyObj.emoji} ${currentUser.currency} (${currentCurrencyObj.symbol})\n\nВыберите новую основную валюту:`;
+  const currencyButtons = Object.values(CURRENCY).map(currency =>
+    Markup.button.callback(`${currency.emoji} ${currency.name} (${currency.symbol})`, `setUserCurrency_${currency.name}`)
+  );
+
+  return ctx.reply(
+      text,
+      Markup.inlineKeyboard(currencyButtons, { columns: 2 })
+  );
+});
+
+bot.action(/setUserCurrency_\w+/, async (ctx) => { 
+  const selectedCurrency = ctx.match[0].split('_')[1];
+  const currencyObject = CURRENCY[selectedCurrency as keyof typeof CURRENCY];
+
+  if (!currencyObject) {
+    return ctx.reply('Ошибка: выбранная валюта не найдена.')
+  }
+
+  await prisma.user.update({
+    where: { id: ctx.from.id },
+    data: { currency: selectedCurrency as Currency }
+  });
+
+  await ctx.deleteMessage();
+  await ctx.reply(`Ваша основная валюта изменена на:\n${currencyObject.emoji} ${currencyObject.name} (${currencyObject.symbol})`);
+});
 
 
 bot.launch()
