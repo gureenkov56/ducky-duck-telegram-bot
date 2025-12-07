@@ -257,6 +257,7 @@ bot.action(/update_transaction_set_category_.+/, async (ctx) => {
     : `💸 ${transaction.amount}${userCurrency.symbol}`;
 
   const editButton = Markup.inlineKeyboard([
+    // добавить кнопку удалить прям здесь или внутри меню редактирования
     Markup.button.callback('Редактировать', `edit_transaction_where_id_${transaction.id}`)
   ])
 

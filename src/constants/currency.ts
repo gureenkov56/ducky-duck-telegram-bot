@@ -24,7 +24,7 @@ export const CURRENCY = {
     },
     RSD: {
         name: 'RSD',
-        symbol: ' RSD',
+        symbol: 'RSD',
         symbolPlace: CurrencySymbolPlace.AFTER,
         emoji: '🇷🇸',
     },
