@@ -19,11 +19,14 @@ const prisma = new PrismaClient()
 const bot = new Telegraf(BOT_TOKEN)
 
 const Messages = {
-  greeting: '👋 Привет! Чтобы записать расход, просто пришли мне сумму. Например так:\n\n`1050`\n\nЕсли хочешь, можно добавить комментарий. Просто напиши его на следующей строке:\n\n`1050\nБилеты в кино`\n\nЧтобы записать доход, просто поставь плюс перед суммой:\n\n`+5000\nЗарплата`',
+  chooseCurrency: 'Давай выберем основную валюту',
+  greeting: '👋 Привет! Я помогу тебе вести учет расходов и доходов. Чтобы записать расход, просто пришли мне сумму. Например так:\n\n`1050`\n\nЕсли хочешь, можно добавить комментарий. Просто напиши его на следующей строке:\n\n`1050\nБилеты в кино`\n\nЧтобы записать доход, просто поставь плюс перед суммой:\n\n`+5000\nЗарплата`',
   youAreRegisteredAlready: 'Ты уже зарегистрирован! Просто пришли мне сумму, чтобы записать расход или доход',
   categoriesAreCreated: 'Категории успешно добавлены! Теперь ты можешь записывать свои расходы и доходы',
   youHaveNotCategories: 'Просто пришли мне список категорий, по одному на строку. Например:\n\n🍕 Еда\n🚗 Транспорт\n🎉 Развлечения\n\nPS: Рекомендую поставить смайлик перед каждой категорией, чтобы было веселее :)'
 }
+
+
 
 /** UTILS **/
 function parseMessage(message: string) {
@@ -46,9 +49,25 @@ function createCategories(ctx: Context) {
   return ctx.reply(Messages.youHaveNotCategories, { parse_mode: 'Markdown' })
 }
 
+// Global middleware
+bot.use(async (ctx, next) => {
+  const userId = ctx.from.id
+
+  const user = await prisma.user.findFirst({where: {id: userId}})
+
+  if (user) {
+    const currencies = [
+      Markup.button.callback('Добавить категорию', `setUserCurrency_${prisma.Curren}`),
+    ]
+    const allCurrencyKeyboard = Mar
+    return ctx.reply(Messages.chooseCurrency)
+  }
+  return next(); // Pass control to the next middleware
+});
+
 
 bot.command('start', async (ctx) => {
-  console.log('STaRT');
+
   const isUserExist = await prisma.user.findFirst({
     where: {
       id: ctx.message.from.id
@@ -135,6 +154,7 @@ bot.on(message('text'), async (ctx) => {
 
   return ctx.reply(messageText, Markup.inlineKeyboard(categoriesButtons, { columns: 2 }));
 })
+
 
 // TODO сделать парсер разных update запросов
 bot.action(/update_transaction_set_category_.+/, async (ctx) => {

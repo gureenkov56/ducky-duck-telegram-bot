@@ -12,10 +12,19 @@ enum TransactionType {
   EXPENSE
 }
 
+enum Currency {
+  USD
+  EUR
+  RUB
+  RSD
+  KGS
+}
+
 model User {
   id           Int           @id
   transactions Transaction[]
   categories   Category[]
+  currency     Currency      @default(RUB)
 }
 
 model Transaction {
