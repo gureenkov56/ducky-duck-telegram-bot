@@ -1,4 +1,4 @@
-import { CURRENCY, NO_CATEGORY_ID, NO_CATEGORY_NAME, CHANGE_MAIN_CURRENCY } from './constants';
+import { CURRENCY, NO_CATEGORY_ID, NO_CATEGORY_NAME, CHANGE_MAIN_CURRENCY, CurrencySymbolPlace } from './constants';
 
 import { message } from 'telegraf/filters'
 import { config } from 'dotenv'
@@ -6,16 +6,14 @@ import {Context, Markup, Telegraf} from 'telegraf';
 import { Currency, PrismaClient } from '@prisma/client'
 import { BotStatus } from './enums';
 import { prismaCategoryCreateMany, getUserId, getUserCategories} from './utils';
+import { Message, Update } from 'telegraf/types';
 
 
 config();
 const BOT_TOKEN = process.env.BOT_TOKEN_LOCALHOST as string
 
-// TODO: дать возможность пользователю выбрать основную валюту | Для некоторых валют символ перед суммой, для других после
-const userCurrency = CURRENCY.RUB
-
 // userState хранит текущее состояние бота для каждого пользователя, например, когда бот ждет от пользователя список категорий
-const userState = new Map<number, BotStatus>();
+const userState = new Map<number, {status: BotStatus, data?: any}>();
 const prisma = new PrismaClient()
 const bot = new Telegraf(BOT_TOKEN)
 
@@ -45,7 +43,7 @@ function parseMessage(message: string) {
 }
 
 function createCategories(ctx: Context) {
-  userState.set(ctx.from.id, BotStatus.waitCategoriesList);
+  userState.set(ctx.from.id, {status: BotStatus.waitCategoriesList});
 
   return ctx.reply(Messages.youHaveNotCategories, { parse_mode: 'Markdown' })
 }
@@ -126,14 +124,70 @@ bot.command('settings', async (ctx) => {
   );
 }) 
 
-bot.on(message('text'), async (ctx) => {
-  if (userState.get(ctx.from.id) === BotStatus.waitCategoriesList) {
+// Обработка сообщений в зависимости от состояния бота для пользователя
+async function processMessageBasedOnState(ctx: Context) {
+  const state = userState.get(ctx.from.id);
+  userState.delete(ctx.from.id);
+
+  if (state.status === BotStatus.waitCategoriesList) {
     await prismaCategoryCreateMany(prisma, ctx.message.text, getUserId(ctx));
-    userState.delete(ctx.from.id);
     const userCategories = await prisma.category.findMany({where: {userId: ctx.from.id}, select: {name: true}});
     const userCategoriesList = userCategories.map(({ name }) => name).join('\n');
     return ctx.reply(Messages.categoriesAreCreated + '\n\nВаши категории:\n' + userCategoriesList);
   }
+
+  if (state.status === BotStatus.waitNewTransactionAmount) {
+    const newAmount = parseFloat(ctx.message.text);
+    if (isNaN(newAmount) || newAmount <= 0) {
+      return ctx.reply('Пожалуйста, введите корректную сумму.');
+    }
+
+    const transactionId = state.data;
+    await prisma.transaction.update({
+      where: { id: transactionId },
+      data: { amount: newAmount }
+    });
+
+    userState.delete(ctx.from.id);
+    return ctx.reply('Сумма успешно обновлена!');
+  }
+
+  if (state.status === BotStatus.waitNewTransactionComment) {
+    const newComment = ctx.message.text;
+
+    const transactionId = state.data;
+    await prisma.transaction.update({
+      where: { id: transactionId },
+      data: { comment: newComment }
+    });
+
+    userState.delete(ctx.from.id);
+    return ctx.reply('Комментарий успешно обновлен!');
+  }
+
+  if (state.status === BotStatus.waitNewTransactionCategory) {
+    const transactionId = state.data;
+    const userCategories = await getUserCategories(prisma, getUserId(ctx));
+
+
+    const categoriesButtons = userCategories.map(category =>
+      Markup.button.callback(category.name, `update_transaction_set_category_${category.id}_where_id_${transactionId}`)
+    );
+
+    categoriesButtons.push(Markup.button.callback(NO_CATEGORY_NAME, `update_transaction_set_category_${NO_CATEGORY_ID}_where_id_${transactionId}`))
+
+    const messageText = `Выбери новую категорию:`;
+
+    ctx.reply(messageText, Markup.inlineKeyboard(categoriesButtons, { columns: 2 }));
+  }
+}
+
+bot.on(message('text'), async (ctx) => {
+  if (userState.get(ctx.from.id)) {
+    processMessageBasedOnState(ctx)
+    return;
+  }
+  
 
   const { isIncome, amount, comment } = parseMessage(ctx.message.text);
 
@@ -152,9 +206,14 @@ bot.on(message('text'), async (ctx) => {
 
   // TODO отдельные категории для INCOME
   const userCategories = await getUserCategories(prisma, getUserId(ctx));
+  const userCurrency = CURRENCY[(await prisma.user.findUnique({where: {id: ctx.from.id}}))?.currency as keyof typeof CURRENCY];
+
+  const amountWithCurrency = userCurrency.symbolPlace === CurrencySymbolPlace.BEFORE
+    ? `${userCurrency.symbol}${transaction.amount}`
+    : `${transaction.amount}${userCurrency.symbol}`;
 
   if (userCategories.length === 0) {
-    await ctx.reply(`Записал расход\n💸 ${transaction.amount} ${userCurrency.symbol}\n${transaction.comment}`)
+    await ctx.reply(`Записал расход\n💸 ${amountWithCurrency}\n${transaction.comment}`)
     const doYouWantToCreateCategoriesButtons =  [
       Markup.button.callback('Да', `wantToCreateCategories_yes`),
       Markup.button.callback('Нет, позже', `wantToCreateCategories_no`)
@@ -168,6 +227,8 @@ bot.on(message('text'), async (ctx) => {
   );
 
   categoriesButtons.push(Markup.button.callback(NO_CATEGORY_NAME, `update_transaction_set_category_${NO_CATEGORY_ID}_where_id_${transaction.id}`))
+  // TODO добавить кнопку "Добавить категорию" сразу при выборе категории
+  // categoriesButtons.push(Markup.button.callback('✍️ Добавить новую категорию', `create_category_for_transaction_${transaction.id}`))
 
   const messageText = `Выбери категорию:`;
 
@@ -188,10 +249,18 @@ bot.action(/update_transaction_set_category_.+/, async (ctx) => {
 
   await ctx.deleteMessage()
   const comment = transaction.comment.length ? `\n💬 ${transaction.comment}` : '';
-  // TODO symbol может быть расположен и перед суммой
-  const amount = `💸 ${transaction.amount}${userCurrency.symbol}`
 
-  ctx.reply(`✍️ Записал\n\n${amount}\n${categoryName}${comment}`);
+  const userCurrency = CURRENCY[(await prisma.user.findUnique({where: {id: ctx.from.id}}))?.currency as keyof typeof CURRENCY];
+  
+  const amount = userCurrency.symbolPlace === CurrencySymbolPlace.BEFORE
+    ? `💸 ${userCurrency.symbol}${transaction.amount}`
+    : `💸 ${transaction.amount}${userCurrency.symbol}`;
+
+  const editButton = Markup.inlineKeyboard([
+    Markup.button.callback('Редактировать', `edit_transaction_where_id_${transaction.id}`)
+  ])
+
+  ctx.reply(`✍️ Записал\n\n${amount}\n${categoryName}${comment}`, editButton);
 });
 
 bot.action(/wantToCreateCategories_(yes|no)/, async (ctx) => {
@@ -206,13 +275,10 @@ bot.action(/wantToCreateCategories_(yes|no)/, async (ctx) => {
   }
 })
 
-bot.action('remove_my_message', (ctx) => {
-  return ctx.deleteMessage();
-})
-
 bot.action('addNewCategories', createCategories)
 
 bot.action(CHANGE_MAIN_CURRENCY, async (ctx) => {
+  ctx.deleteMessage();
   // TODO: Implement change main currency logic
   const currentUser = await prisma.user.findFirst({where: {id: ctx.from.id}})
   if (!currentUser) {
@@ -232,7 +298,7 @@ bot.action(CHANGE_MAIN_CURRENCY, async (ctx) => {
   );
 });
 
-bot.action(/setUserCurrency_\w+/, async (ctx) => { 
+bot.action(/setUserCurrency_\w+/, async (ctx) => {
   const selectedCurrency = ctx.match[0].split('_')[1];
   const currencyObject = CURRENCY[selectedCurrency as keyof typeof CURRENCY];
 
@@ -248,6 +314,58 @@ bot.action(/setUserCurrency_\w+/, async (ctx) => {
   await ctx.deleteMessage();
   await ctx.reply(`Ваша основная валюта изменена на:\n${currencyObject.emoji} ${currencyObject.name} (${currencyObject.symbol})`);
 });
+
+bot.action(/edit_transaction_where_id_\d+/, async (ctx) => {
+  const transactionId = parseInt(ctx.match[0].split('_')[4], 10);
+
+  const transaction = await prisma.transaction.findFirst({where: {id: transactionId}});
+  if (!transaction) {
+    return ctx.reply('Ошибка: запись не найдена.')
+  }
+
+  // await ctx.deleteMessage();
+  const transactionData = (ctx.update.callback_query.message as Message.TextMessage).text.split('\n\n')[1];
+  const text = `Что изменить в записи:\n${transactionData}`;
+
+  const buttons = [
+    Markup.button.callback('Сумму', `edit_transaction_${transactionId}_field_amount`),
+    Markup.button.callback('Комментарий', `edit_transaction_${transactionId}_field_comment`),
+    Markup.button.callback('Категорию', `edit_transaction_${transactionId}_field_category`),
+  ]
+
+  await ctx.reply(text, Markup.inlineKeyboard(buttons, { columns: 1 }))
+})
+
+bot.action(/edit_transaction_.+/, async (ctx) => {
+  const data = ctx.match[0];
+  const parts = data.split('_');
+  const transactionId = parseInt(parts[2], 10);
+  const fieldToEdit = parts[4];
+
+  if (fieldToEdit === 'amount') {
+    userState.set(ctx.from.id, {status: BotStatus.waitNewTransactionAmount, data: transactionId});
+    return ctx.reply('Пожалуйста, отправьте новую сумму для этой записи:');
+  }
+
+  if (fieldToEdit === 'comment') {
+    userState.set(ctx.from.id, {status: BotStatus.waitNewTransactionComment, data: transactionId});
+    return ctx.reply('Пожалуйста, отправьте новый комментарий для этой записи:');
+  }
+
+  if (fieldToEdit === 'category') {
+    const userCategories = await getUserCategories(prisma, ctx.from.id);
+
+    const categoriesButtons = userCategories.map(category =>
+      Markup.button.callback(category.name, `update_transaction_set_category_${category.id}_where_id_${transactionId}`)
+    );
+
+    categoriesButtons.push(Markup.button.callback(NO_CATEGORY_NAME, `update_transaction_set_category_${NO_CATEGORY_ID}_where_id_${transactionId}`))
+
+    const messageText = `Выбери новую категорию:`;
+
+    ctx.reply(messageText, Markup.inlineKeyboard(categoriesButtons, { columns: 2 }));
+  }
+})
 
 
 bot.launch()

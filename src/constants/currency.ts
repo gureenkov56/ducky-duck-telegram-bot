@@ -1,4 +1,4 @@
-enum CurrencySymbolPlace {
+export enum CurrencySymbolPlace {
     BEFORE,
     AFTER,
 }
@@ -24,7 +24,7 @@ export const CURRENCY = {
     },
     RSD: {
         name: 'RSD',
-        symbol: 'din',
+        symbol: ' RSD',
         symbolPlace: CurrencySymbolPlace.AFTER,
         emoji: '🇷🇸',
     },
