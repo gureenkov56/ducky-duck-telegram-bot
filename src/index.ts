@@ -1,3 +1,4 @@
+import { CURRENCY, NO_CATEGORY_ID, NO_CATEGORY_NAME } from './constants/constants';
 
 import { message } from 'telegraf/filters'
 import { config } from 'dotenv'
@@ -5,11 +6,10 @@ import {Context, Markup, Telegraf} from 'telegraf';
 import { PrismaClient } from '@prisma/client'
 import { BotStatus } from './enums';
 import { prismaCategoryCreateMany, getUserId, getUserCategories} from './utils';
-import {CURRENCY} from "./constants";
 
 
 config();
-const BOT_TOKEN = process.env.BOT_TOKEN as string
+const BOT_TOKEN = process.env.BOT_TOKEN_LOCALHOST as string
 
 // TODO: дать возможность пользователю выбрать основную валюту | Для некоторых валют символ перед суммой, для других после
 const userCurrency = CURRENCY.RUB
@@ -50,20 +50,20 @@ function createCategories(ctx: Context) {
 }
 
 // Global middleware
-bot.use(async (ctx, next) => {
-  const userId = ctx.from.id
+// bot.use(async (ctx, next) => {
+//   const userId = ctx.from.id
 
-  const user = await prisma.user.findFirst({where: {id: userId}})
+//   const user = await prisma.user.findFirst({where: {id: userId}})
 
-  if (user) {
-    const currencies = [
-      Markup.button.callback('Добавить категорию', `setUserCurrency_${prisma.Curren}`),
-    ]
-    const allCurrencyKeyboard = Mar
-    return ctx.reply(Messages.chooseCurrency)
-  }
-  return next(); // Pass control to the next middleware
-});
+//   if (user) {
+//     const currencies = [
+//       Markup.button.callback('Добавить категорию', `setUserCurrency_${prisma.CURRENCY}`),
+//     ]
+//     // const allCurrencyKeyboard = Mar
+//     return ctx.reply(Messages.chooseCurrency)
+//   }
+//   return next(); // Pass control to the next middleware
+// });
 
 
 bot.command('start', async (ctx) => {
@@ -150,9 +150,11 @@ bot.on(message('text'), async (ctx) => {
     Markup.button.callback(category.name, `update_transaction_set_category_${category.id}_where_id_${transaction.id}`)
   );
 
-  const messageText = `Записал ${isIncome ? 'доход' : 'расход'} на сумму ${amount}${userCurrency.symbol}${comment ? ` с комментарием: "${comment}"` : ''}.\n\nТеперь выбери категорию для этой транзакции:`;
+  categoriesButtons.push(Markup.button.callback(NO_CATEGORY_NAME, `update_transaction_set_category_${NO_CATEGORY_ID}_where_id_${transaction.id}`))
 
-  return ctx.reply(messageText, Markup.inlineKeyboard(categoriesButtons, { columns: 2 }));
+  const messageText = `Выбери категорию:`;
+
+  ctx.reply(messageText, Markup.inlineKeyboard(categoriesButtons, { columns: 2 }));
 })
 
 
@@ -162,8 +164,10 @@ bot.action(/update_transaction_set_category_.+/, async (ctx) => {
   const categoryId = parseInt(ctx.match[0].split('_')[4], 10);
   const transactionId = parseInt(ctx.match[0].split('_')[7], 10);
 
-  const transaction = await prisma.transaction.update({where: {id: transactionId}, data: {categoryId: categoryId}})
-  const {name: categoryName} = await prisma.category.findUnique({ where: { id: transaction.categoryId }, select: {name: true} })
+  const isCategoryNoCategory = categoryId === 0;
+
+  const transaction = isCategoryNoCategory ? await prisma.transaction.findFirst({where: {id: transactionId}}) : await prisma.transaction.update({where: {id: transactionId}, data: {categoryId: categoryId}})
+  const {name: categoryName} = isCategoryNoCategory ? {name: NO_CATEGORY_NAME} : await prisma.category.findUnique({ where: { id: transaction.categoryId }, select: {name: true} })
 
   await ctx.deleteMessage()
   const comment = transaction.comment.length ? `\n💬 ${transaction.comment}` : '';
@@ -183,6 +187,10 @@ bot.action(/wantToCreateCategories_(yes|no)/, async (ctx) => {
     await ctx.deleteMessage();
     return ctx.reply(`Окей! Ты можешь добавить категории в любой момент, отправив команду /categories`, { parse_mode: 'Markdown' })
   }
+})
+
+bot.action('remove_my_message', (ctx) => {
+  return ctx.deleteMessage();
 })
 
 bot.action('addNewCategories', createCategories)
