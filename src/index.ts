@@ -7,10 +7,11 @@ import { Currency, PrismaClient } from '@prisma/client'
 import { BotStatus } from './enums';
 import { prismaCategoryCreateMany, getUserId, getUserCategories} from './utils';
 import { Message, Update } from 'telegraf/types';
+import { get } from 'http';
 
 
 config();
-const BOT_TOKEN = process.env.BOT_TOKEN_LOCALHOST as string
+const BOT_TOKEN = process.env.BOT_TOKEN as string
 
 // userState хранит текущее состояние бота для каждого пользователя, например, когда бот ждет от пользователя список категорий
 const userState = new Map<number, {status: BotStatus, data?: any}>();
@@ -183,13 +184,15 @@ async function processMessageBasedOnState(ctx: Context) {
 }
 
 bot.on(message('text'), async (ctx) => {
+  ctx.deleteMessage();
+
   if (userState.get(ctx.from.id)) {
     processMessageBasedOnState(ctx)
     return;
   }
-  
 
   const { isIncome, amount, comment } = parseMessage(ctx.message.text);
+  const userId = getUserId(ctx);
 
   if (isNaN(amount) || amount <= 0) {
     return ctx.reply('Пожалуйста, введите корректную сумму. Например: `1050` или `+5000`.\n\nТакже сразу можно указать комментарий, тогда сообщение будет выглядеть так:\`\`\`\n550\nБилеты в кино\`\`\`', { parse_mode: 'Markdown' })
@@ -205,12 +208,12 @@ bot.on(message('text'), async (ctx) => {
   })
 
   // TODO отдельные категории для INCOME
-  const userCategories = await getUserCategories(prisma, getUserId(ctx));
-  const userCurrency = CURRENCY[(await prisma.user.findUnique({where: {id: ctx.from.id}}))?.currency as keyof typeof CURRENCY];
+  const userCategories = await getUserCategories(prisma, userId);
+  const userCurrency = CURRENCY[(await prisma.user.findUnique({where: {id: userId}}))?.currency as keyof typeof CURRENCY];
 
   const amountWithCurrency = userCurrency.symbolPlace === CurrencySymbolPlace.BEFORE
     ? `${userCurrency.symbol}${transaction.amount}`
-    : `${transaction.amount}${userCurrency.symbol}`;
+    : `${transaction.amount} ${userCurrency.symbol}`;
 
   if (userCategories.length === 0) {
     await ctx.reply(`Записал расход\n💸 ${amountWithCurrency}\n${transaction.comment}`)
@@ -230,7 +233,7 @@ bot.on(message('text'), async (ctx) => {
   // TODO добавить кнопку "Добавить категорию" сразу при выборе категории
   // categoriesButtons.push(Markup.button.callback('✍️ Добавить новую категорию', `create_category_for_transaction_${transaction.id}`))
 
-  const messageText = `Выбери категорию:`;
+  const messageText = `✍️ Записал расход\n💸 ${amountWithCurrency}\n💬 ${transaction.comment}\n\nВыбери категорию:`;
 
   ctx.reply(messageText, Markup.inlineKeyboard(categoriesButtons, { columns: 2 }));
 })
