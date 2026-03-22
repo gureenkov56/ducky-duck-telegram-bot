@@ -3,4 +3,5 @@ export enum BotStatus {
     waitNewTransactionAmount,
     waitNewTransactionCategory,
     waitNewTransactionComment,
+    waitNewCategoryForTransaction,
 }

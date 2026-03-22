@@ -8,6 +8,7 @@ import { BotStatus } from './enums';
 import { prismaCategoryCreateMany, getUserId, getUserCategories} from './utils';
 import { Message, Update } from 'telegraf/types';
 import { get } from 'http';
+import { prismaCategoryCreateOne } from './utils/db/prismaCategoryCreateOne';
 
 
 config();
@@ -130,6 +131,8 @@ async function processMessageBasedOnState(ctx: Context) {
   const state = userState.get(ctx.from.id);
   userState.delete(ctx.from.id);
 
+
+  // TODO: switch case + вынести в отдельные функции для каждой ветки
   if (state.status === BotStatus.waitCategoriesList) {
     await prismaCategoryCreateMany(prisma, ctx.message.text, getUserId(ctx));
     const userCategories = await prisma.category.findMany({where: {userId: ctx.from.id}, select: {name: true}});
@@ -170,7 +173,6 @@ async function processMessageBasedOnState(ctx: Context) {
     const transactionId = state.data;
     const userCategories = await getUserCategories(prisma, getUserId(ctx));
 
-
     const categoriesButtons = userCategories.map(category =>
       Markup.button.callback(category.name, `update_transaction_set_category_${category.id}_where_id_${transactionId}`)
     );
@@ -179,7 +181,26 @@ async function processMessageBasedOnState(ctx: Context) {
 
     const messageText = `Выбери новую категорию:`;
 
-    ctx.reply(messageText, Markup.inlineKeyboard(categoriesButtons, { columns: 2 }));
+    ctx.reply(messageText, Markup.inlineKeyboard(categoriesButtons, { columns: 1 }));
+  }
+
+  if (state.status === BotStatus.waitNewCategoryForTransaction) {
+    const transactionId = state.data;
+    const newCategoryName = ctx.message.text;
+    const newCategory = await prismaCategoryCreateOne(prisma, newCategoryName, getUserId(ctx));
+    const transaction = await prisma.transaction.update({
+      where: { id: transactionId },
+      data: { categoryId: newCategory.id }
+    });
+
+    // TODO: create function to generate messages text
+    let messageText = `Записал расход\n🔻${transaction.amount}`;
+    if (transaction.comment) {
+        messageText += `\n💬 ${transaction.comment}`;
+    }
+    messageText += `\n\nКатегория "${newCategory.name}" успешно создана и присвоена записи!`;
+
+    ctx.reply(messageText);
   }
 }
 
@@ -216,7 +237,7 @@ bot.on(message('text'), async (ctx) => {
     : `${transaction.amount} ${userCurrency.symbol}`;
 
   if (userCategories.length === 0) {
-    await ctx.reply(`Записал расход\n💸 ${amountWithCurrency}\n${transaction.comment}`)
+    await ctx.reply(`Записал расход\n🔻 ${amountWithCurrency}\n${transaction.comment}`)
     const doYouWantToCreateCategoriesButtons =  [
       Markup.button.callback('Да', `wantToCreateCategories_yes`),
       Markup.button.callback('Нет, позже', `wantToCreateCategories_no`)
@@ -230,6 +251,7 @@ bot.on(message('text'), async (ctx) => {
   );
 
   categoriesButtons.push(Markup.button.callback(NO_CATEGORY_NAME, `update_transaction_set_category_${NO_CATEGORY_ID}_where_id_${transaction.id}`))
+  categoriesButtons.push(Markup.button.callback('Добавить категорию', `create_category_for_transaction_${transaction.id}`))
   // TODO добавить кнопку "Добавить категорию" сразу при выборе категории
   // categoriesButtons.push(Markup.button.callback('✍️ Добавить новую категорию', `create_category_for_transaction_${transaction.id}`))
 
@@ -240,8 +262,13 @@ bot.on(message('text'), async (ctx) => {
 
   messageText += `\n\nВыбери категорию:`;
 
-  ctx.reply(messageText, Markup.inlineKeyboard(categoriesButtons, { columns: 2 }));
+  ctx.reply(messageText, Markup.inlineKeyboard(categoriesButtons, { columns: 1 }));
 })
+
+// TODO: в настройках: 
+// 1) изменить основную валюту (при этом все суммы в записях должны отображаться в новой валюте, для этого нужно сохранять валюту при каждой записи и при отображении конвертировать сумму в основную валюту пользователя)
+// 2) добавить возможность менять язык бота
+// 3) дать возможность отключить эмодзи
 
 
 // TODO сделать парсер разных update запросов
@@ -271,6 +298,12 @@ bot.action(/update_transaction_set_category_.+/, async (ctx) => {
 
   ctx.reply(`Записал\n\n${amount}\n${categoryName}${comment}`, editButton);
 });
+
+bot.action(/create_category_for_transaction_.+/, async (ctx) => {
+  const transactionId = parseInt(ctx.match[0].split('_')[4], 10);
+  userState.set(ctx.from.id, {status: BotStatus.waitNewCategoryForTransaction, data: transactionId});
+  return ctx.reply('Пожалуйста, отправьте название новой категории для этой записи:');
+})
 
 bot.action(/wantToCreateCategories_(yes|no)/, async (ctx) => {
   const data = ctx.match[0]
