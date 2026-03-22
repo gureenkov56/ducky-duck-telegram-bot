@@ -233,7 +233,12 @@ bot.on(message('text'), async (ctx) => {
   // TODO добавить кнопку "Добавить категорию" сразу при выборе категории
   // categoriesButtons.push(Markup.button.callback('✍️ Добавить новую категорию', `create_category_for_transaction_${transaction.id}`))
 
-  const messageText = `✍️ Записал расход\n💸 ${amountWithCurrency}\n💬 ${transaction.comment}\n\nВыбери категорию:`;
+  let messageText = `Записан расход\n🔻${amountWithCurrency}`;
+  if (transaction.comment) {
+    messageText += `\n💬 ${transaction.comment}`;
+  }
+
+  messageText += `\n\nВыбери категорию:`;
 
   ctx.reply(messageText, Markup.inlineKeyboard(categoriesButtons, { columns: 2 }));
 })
@@ -264,7 +269,7 @@ bot.action(/update_transaction_set_category_.+/, async (ctx) => {
     Markup.button.callback('Редактировать', `edit_transaction_where_id_${transaction.id}`)
   ])
 
-  ctx.reply(`✍️ Записал\n\n${amount}\n${categoryName}${comment}`, editButton);
+  ctx.reply(`Записал\n\n${amount}\n${categoryName}${comment}`, editButton);
 });
 
 bot.action(/wantToCreateCategories_(yes|no)/, async (ctx) => {
